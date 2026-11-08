@@ -73,8 +73,8 @@ final class AlarmScheduler {
                 AlarmKitBridge.cancel(nag.alarmKitID)
             }
             scheduler.index.remove(alarmKitIDs: Set(nags.map(\.alarmKitID)))
-            // Stop (never cancel) a repeating main alarm in case it is still alerting.
-            AlarmKitBridge.stop(riseID)
+            // Stop (never cancel) a repeating main alarm, but only if it is still alerting.
+            AlarmKitBridge.stopIfAlerting(riseID)
             if let alarm = scheduler.store.alarm(id: riseID), !alarm.isRepeating {
                 scheduler.store.update(id: riseID) { $0.isEnabled = false }
                 scheduler.cancelEverything(for: riseID)

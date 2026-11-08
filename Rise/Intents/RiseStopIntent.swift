@@ -32,9 +32,8 @@ struct RiseStopIntent: LiveActivityIntent {
 
     func perform() async throws -> some IntentResult {
         let id = alarmID
-        await MainActor.run {
-            AppModel.shared.handleStopIntent(alarmKitID: id)
-        }
+        let model = await MainActor.run { AppModel.shared }
+        await model.handleStopIntent(alarmKitID: id)
         return .result()
     }
 }

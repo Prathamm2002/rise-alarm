@@ -58,6 +58,9 @@ final class AppModel {
         startMonitorIfNeeded()
         await scheduler.reconcile()
         checkForPendingMission()
+        // Back from the background mid-mission: a system alert may have
+        // interrupted (and paused) the in-app tone.
+        if let mission = router.active, !mission.isPractice { sound.resumeIfNeeded() }
     }
 
     func requestAuthorization() async {
@@ -86,21 +89,23 @@ final class AppModel {
               let alarm = store.alarm(id: riseID),
               let occurrence = occurrenceForTappedAlert(akID: akID, alarm: alarm) else {
             // Stale alert (unknown or already completed): just silence it.
-            AlarmKitBridge.stop(akID)
+            AlarmKitBridge.stopIfAlerting(akID)
             return
         }
-        AlarmKitBridge.stop(akID)
+        AlarmKitBridge.stopIfAlerting(akID)
         presentMission(riseAlarmID: riseID, occurrence: occurrence)
     }
 
     /// Silences the tapped alert (never cancels): the pre-scheduled nags keep
     /// coming until the mission is completed.
-    func handleStopIntent(alarmKitID: String) {
+    /// Awaited by the intent so the reconcile finishes before iOS suspends a
+    /// background-launched app (it may schedule the next occurrence's nags).
+    func handleStopIntent(alarmKitID: String) async {
         guard !AppEnvironment.isRunningTests else { return }
         if let akID = UUID(uuidString: alarmKitID) {
-            AlarmKitBridge.stop(akID)
+            AlarmKitBridge.stopIfAlerting(akID)
         }
-        Task { await scheduler.reconcile() }
+        await scheduler.reconcile()
     }
 
     private func occurrenceForTappedAlert(akID: UUID, alarm: RiseAlarm) -> Date? {
@@ -124,7 +129,10 @@ final class AppModel {
                   let alarm = store.alarm(id: riseID) else { continue }
             if let current = router.active {
                 // In-app tone is already playing for this alarm: silence the system nag.
-                if current.riseAlarmID == riseID, inForeground { AlarmKitBridge.stop(snapshot.id) }
+                if current.riseAlarmID == riseID, inForeground {
+                    AlarmKitBridge.stop(snapshot.id)
+                    resumeMissionSoundSoon()
+                }
                 continue
             }
             guard inForeground else { continue }
@@ -154,6 +162,7 @@ final class AppModel {
         if let done = alarm.lastCompletedOccurrence, occurrence <= done { return }
         stopAlerting(riseID: riseAlarmID)
         if let current = router.active, current.riseAlarmID == riseAlarmID, current.occurrence == occurrence {
+            resumeMissionSoundSoon()
             return
         }
         guard router.active == nil else { return }
@@ -188,6 +197,16 @@ final class AppModel {
     func practiceMission(_ config: MissionConfig, label: String) -> ActiveMission {
         ActiveMission(riseAlarmID: nil, occurrence: nil, label: label.isEmpty ? "Practice" : label,
                       config: config.normalized(), isPractice: true)
+    }
+
+    /// The system alert we just stopped may have interrupted the in-app tone;
+    /// restart it once the interruption has had a moment to end.
+    private func resumeMissionSoundSoon() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self, let mission = self.router.active, !mission.isPractice else { return }
+            self.sound.resumeIfNeeded()
+        }
     }
 
     private func stopAlerting(riseID: UUID) {

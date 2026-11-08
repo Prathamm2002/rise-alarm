@@ -90,6 +90,16 @@ enum AlarmKitBridge {
         }
     }
 
+    /// Stops `id` only if AlarmKit reports it alerting (or if the list cannot be
+    /// read). Calling `stop` on a merely *scheduled* repeating alarm has
+    /// unverified semantics and could skip its next occurrence, so avoid it.
+    static func stopIfAlerting(_ id: UUID) {
+        if let live = currentAlarms(), let match = live.first(where: { $0.id == id }), !match.isAlerting {
+            return
+        }
+        stop(id)
+    }
+
     /// Current AlarmKit alarms, or nil if AlarmKit could not be read
     /// (callers must not treat that as "no alarms").
     static func currentAlarms() -> [AlarmSnapshot]? {

@@ -75,4 +75,30 @@ final class OccurrenceResolverTests: XCTestCase {
                                                                 now: date(5, 23, 0), calendar: cal, policy: .standard)
         XCTAssertEqual(beforeTime, date(6, 7, 0))
     }
+
+    func testWeekdayCompletionTargetsNextWorkday() {
+        // Mon 9 Nov 2026 07:00 completed at 07:04: nags move to Tue 10 Nov 07:00.
+        let tuesday = OccurrenceResolver.nagTargetOccurrence(hour: 7, minute: 0, weekdays: Weekday.workdays,
+                                                             armedSince: date(1, 22, 0), lastCompleted: date(9, 7, 0),
+                                                             now: date(9, 7, 4), calendar: cal, policy: .standard)
+        XCTAssertEqual(tuesday, date(10, 7, 0))
+        // Fri 13 Nov completed: next target skips the weekend to Mon 16 Nov.
+        let monday = OccurrenceResolver.nagTargetOccurrence(hour: 7, minute: 0, weekdays: Weekday.workdays,
+                                                            armedSince: date(1, 22, 0), lastCompleted: date(13, 7, 0),
+                                                            now: date(13, 7, 4), calendar: cal, policy: .standard)
+        XCTAssertEqual(monday, date(16, 7, 0))
+        // Missed Monday (window over, never completed): target is still the next workday.
+        let missed = OccurrenceResolver.nagTargetOccurrence(hour: 7, minute: 0, weekdays: Weekday.workdays,
+                                                            armedSince: date(1, 22, 0), lastCompleted: nil,
+                                                            now: date(9, 7, 30), calendar: cal, policy: .standard)
+        XCTAssertEqual(missed, date(10, 7, 0))
+    }
+
+    func testNagDatesForTargetAreOneToTenMinutesAfter() {
+        let target = date(10, 7, 0)
+        let nags = NagChain.futureDates(occurrence: target, now: date(9, 7, 4), policy: .standard)
+        XCTAssertEqual(nags.count, 10)
+        XCTAssertEqual(nags.first, date(10, 7, 1))
+        XCTAssertEqual(nags.last, date(10, 7, 10))
+    }
 }
