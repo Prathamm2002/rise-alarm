@@ -1,0 +1,52 @@
+name: Rise
+attributes:
+  ORGANIZATIONNAME: Pratham Motwaney
+options:
+  bundleIdPrefix: com.prathammotwaney
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    DEVELOPMENT_TEAM: ""
+targets:
+  Rise:
+    type: application
+    platform: iOS
+    sources: [Rise]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.prathammotwaney.rise
+        PRODUCT_NAME: Rise
+        INFOPLIST_FILE: Rise/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        ENABLE_PREVIEWS: YES
+  RiseTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [RiseTests]
+    dependencies:
+      - target: Rise
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.prathammotwaney.rise.tests
+schemes:
+  Rise:
+    build:
+      targets:
+        Rise: all
+        RiseTests: [test]
+    test:
+      config: Debug
+      targets: [RiseTests]
+      gatherCoverageData: false
+    run:
+      config: Debug
+    archive:
+      config: Release

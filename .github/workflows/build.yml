@@ -1,0 +1,103 @@
+name: Build Rise
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: macos-26            # fallback: macos-15 (also ships Xcode 26.x)
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Toolchain info
+        run: xcodebuild -version && xcrun --sdk iphoneos --show-sdk-version && xcrun simctl list runtimes
+      - name: Dump AlarmKit / AppIntents API (verification)
+        continue-on-error: true
+        run: |
+          mkdir -p api-dump
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          for FW in AlarmKit AppIntents ActivityKit; do
+            F=$(find "$SDK/System/Library/Frameworks/$FW.framework" \( -name "arm64e-apple-ios.swiftinterface" -o -name "arm64-apple-ios.swiftinterface" \) | head -1)
+            [ -n "$F" ] && cp "$F" "api-dump/$FW.swiftinterface"
+          done
+          # Cross-import overlays or helper modules that mention AlarmKit
+          find "$SDK" -name "*.swiftinterface" -path "*Alarm*" > api-dump/alarm-related-interfaces.txt 2>/dev/null || true
+          grep -nE "init\(title|stopButton|secondaryButtonBehavior|struct AlarmConfiguration|func schedule|alarmUpdates|func stop|func cancel|authorizationState|enum State|case alerting|AlarmError|deprecated|unavailable" api-dump/AlarmKit.swiftinterface || true
+          grep -nE "openAppWhenRun|supportedModes|protocol LiveActivityIntent" api-dump/AppIntents.swiftinterface || true
+          grep -nE "AlertSound" api-dump/ActivityKit.swiftinterface | head -20 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk-api-dump
+          path: api-dump/
+          if-no-files-found: ignore
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Pick iOS simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, re, sys
+          d = json.load(sys.stdin)["devices"]
+          def ver(rt):
+              m = re.search(r"iOS-(\d+)-(\d+)", rt)
+              return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+          rts = [rt for rt in d if ver(rt)[0] >= 26 and any(x["name"].startswith("iPhone") for x in d[rt])]
+          # Prefer the newest iOS 26.x runtime; otherwise the newest runtime >= 26.
+          ios26 = sorted([rt for rt in rts if ver(rt)[0] == 26], key=ver, reverse=True)
+          pick = ios26 or sorted(rts, key=ver, reverse=True)
+          for rt in pick:
+              for x in d[rt]:
+                  if x["name"].startswith("iPhone"):
+                      print(x["udid"]); print(rt + " / " + x["name"], file=sys.stderr); sys.exit()
+          ')
+          test -n "$UDID" || { echo "No iOS 26+ iPhone simulator"; exit 1; }
+          echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+      - name: Unit tests
+        run: |
+          set -o pipefail
+          xcodebuild test -project Rise.xcodeproj -scheme Rise \
+            -destination "platform=iOS Simulator,id=$SIM_UDID" \
+            -resultBundlePath TestResults.xcresult
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-results
+          path: TestResults.xcresult
+      - name: Build Release (unsigned, device)
+        run: |
+          set -o pipefail
+          xcodebuild build -project Rise.xcodeproj -scheme Rise -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+      - name: Package IPA
+        run: |
+          rm -rf Payload Rise.ipa && mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/Rise.app Payload/
+          /usr/bin/zip -qry Rise.ipa Payload
+          ls -lh Rise.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Rise-ipa
+          path: Rise.ipa
+      - name: Move 'latest' tag to this commit
+        run: |
+          git tag -f latest "$GITHUB_SHA"
+          git push -f origin refs/tags/latest
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Rise (latest build)
+          body: "Unsigned build of ${{ github.sha }}. Sideload with Sideloadly. See README."
+          files: Rise.ipa
+          make_latest: true
+          prerelease: false

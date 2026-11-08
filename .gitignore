@@ -1,0 +1,9 @@
+Rise.xcodeproj/
+build/
+DerivedData/
+*.ipa
+Payload/
+*.xcresult
+api-dump/
+.DS_Store
+xcuserdata/
