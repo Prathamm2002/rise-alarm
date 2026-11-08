@@ -16,8 +16,7 @@ Tip: for every test, set the alarm 2 minutes ahead so you have time to lock the 
 | | | Wait for the alarm time | The alarm rings in Silent mode on the Lock Screen, shows the alarm title, a Stop control and a Start Mission button |
 | Verify if Start Mission opens the mission and solving it turns everything off | Ensure that Start Mission opens Rise straight into the mission, the in-app tone loops until the mission is solved, and a solved one-time alarm is turned off with no backup alarms left. Pre-requisites: 1. Previous test's setup (permission allowed, Silent mode on). 2. A one-time Math alarm (3 problems) set 2 minutes ahead, phone locked. | Open Rise and confirm the alarm is listed, then lock the phone | The alarm is listed as enabled |
 | | | Wait for the alarm to ring | The system alarm rings with Start Mission |
-| | | Tap Start Mission and unlock the phone | Rise opens directly into the Math mission. The system alert stops, Rise's own beeping tone plays in Silent mode and the screen stays awake |
-| | | Try to swipe the mission screen down | The mission screen does not move and has no close button |
+| | | Tap Start Mission and unlock the phone | Rise opens directly into the Math mission with no close button. The system alert stops, Rise's own beeping tone plays in Silent mode and the screen stays awake |
 | | | Solve the 3 problems and tap Submit after each | Progress goes 1/3, 2/3, 3/3, then "Good morning" shows and the tone stops |
 | | | Wait for the list to appear | The alarm list shows the alarm switched off |
 | | | Lock the phone and wait 11 minutes | No backup alarm ("mission not done") rings |

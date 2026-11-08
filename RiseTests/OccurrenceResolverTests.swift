@@ -94,6 +94,51 @@ final class OccurrenceResolverTests: XCTestCase {
         XCTAssertEqual(missed, date(10, 7, 0))
     }
 
+    private func targets(now: Date, armedSince: Date, lastCompleted: Date? = nil,
+                         weekdays: Set<Weekday>) -> [Date] {
+        OccurrenceResolver.nagTargetOccurrences(hour: 7, minute: 0, weekdays: weekdays, armedSince: armedSince,
+                                                lastCompleted: lastCompleted, now: now, calendar: cal,
+                                                policy: .standard)
+    }
+
+    func testRepeatingTargetsCoverNextAndFollowingOccurrence() {
+        // Sunday 8 Nov 22:00, last reconcile before an ignored Monday: Tuesday is already covered.
+        XCTAssertEqual(targets(now: date(8, 22, 0), armedSince: date(1, 0, 0), weekdays: Weekday.workdays),
+                       [date(9, 7, 0), date(10, 7, 0)])
+    }
+
+    func testRepeatingTargetsDuringActiveOccurrenceIncludeTomorrow() {
+        // Stop pressed at Mon 07:00:30: the alerting occurrence and Tuesday both get nags.
+        let now = date(9, 7, 0).addingTimeInterval(30)
+        XCTAssertEqual(targets(now: now, armedSince: date(1, 0, 0), weekdays: Weekday.workdays),
+                       [date(9, 7, 0), date(10, 7, 0)])
+    }
+
+    func testRepeatingTargetsAfterIgnoredOccurrence() {
+        // Monday ignored (window over, never completed): Tuesday and Wednesday.
+        XCTAssertEqual(targets(now: date(9, 7, 31), armedSince: date(1, 0, 0), weekdays: Weekday.workdays),
+                       [date(10, 7, 0), date(11, 7, 0)])
+    }
+
+    func testRepeatingTargetsSkipWeekend() {
+        // Friday 13 Nov completed: Monday 16 and Tuesday 17.
+        XCTAssertEqual(targets(now: date(13, 7, 4), armedSince: date(1, 0, 0), lastCompleted: date(13, 7, 0),
+                               weekdays: Weekday.workdays),
+                       [date(16, 7, 0), date(17, 7, 0)])
+    }
+
+    func testSingleWeekdayFollowingIsOneWeekLater() {
+        XCTAssertEqual(targets(now: date(8, 22, 0), armedSince: date(1, 0, 0), weekdays: [.monday]),
+                       [date(9, 7, 0), date(16, 7, 0)])
+    }
+
+    func testOneTimeTargetsOnlyItsOccurrence() {
+        XCTAssertEqual(targets(now: date(8, 22, 0), armedSince: date(8, 21, 0), weekdays: []),
+                       [date(9, 7, 0)])
+        XCTAssertEqual(targets(now: date(9, 7, 3), armedSince: date(8, 21, 0), weekdays: []),
+                       [date(9, 7, 0)])
+    }
+
     func testNagDatesForTargetAreOneToTenMinutesAfter() {
         let target = date(10, 7, 0)
         let nags = NagChain.futureDates(occurrence: target, now: date(9, 7, 4), policy: .standard)

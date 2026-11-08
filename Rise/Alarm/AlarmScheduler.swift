@@ -9,7 +9,8 @@ import Foundation
 import Observation
 
 /// Keeps AlarmKit in step with the store: one main alarm per enabled Rise alarm
-/// plus up to `policy.count` one-shot nags for the next or active occurrence.
+/// plus up to `policy.count` one-shot nags for the next or active occurrence
+/// and, for repeating alarms, for the occurrence after it too.
 ///
 /// All public operations are serialised so overlapping triggers (launch,
 /// foreground, intents, completion) never double-schedule nags.
@@ -41,7 +42,7 @@ final class AlarmScheduler {
             guard alarm.isEnabled, scheduler.isAuthorized() else { return }
             let now = Date.now
             if await scheduler.scheduleMain(alarm) {
-                await scheduler.ensureNags(for: alarm, now: now)
+                await scheduler.ensureNags(for: [alarm], now: now)
             }
         }
     }
@@ -115,7 +116,8 @@ final class AlarmScheduler {
         for nag in strays { AlarmKitBridge.cancel(nag.alarmKitID) }
         index.remove(alarmKitIDs: Set(strays.map(\.alarmKitID)))
 
-        // 3. Per alarm.
+        // 3. Per alarm: main alarm first, then nags for all of them together.
+        var needNags: [RiseAlarm] = []
         for alarm in store.alarms {
             guard alarm.isEnabled else {
                 cancelEverything(for: alarm.id)
@@ -135,8 +137,9 @@ final class AlarmScheduler {
             if !liveIDs.contains(alarm.id), active == nil {
                 guard await scheduleMain(alarm) else { continue }
             }
-            await ensureNags(for: alarm, now: now)
+            needNags.append(alarm)
         }
+        await ensureNags(for: needNags, now: now)
     }
 
     // MARK: Helpers
@@ -152,33 +155,75 @@ final class AlarmScheduler {
         }
     }
 
-    private func ensureNags(for alarm: RiseAlarm, now: Date) async {
-        let existing = index.nags(for: alarm.id)
-        guard let target = alarm.nagTargetOccurrence(now: now, policy: policy) else {
-            cancel(existing)
-            return
-        }
-        cancel(existing.filter { $0.occurrence != target })
+    private enum FillOutcome { case done, limitReached, failed }
 
-        let have = Set(existing.filter { $0.occurrence == target }.map(\.ordinal))
-        let dates = NagChain.dates(occurrence: target, policy: policy)
+    /// Pre-schedules nags for every alarm in `alarms`. The current or next
+    /// occurrence of every alarm is filled first; the following occurrence of
+    /// repeating alarms only after that, so AlarmKit's alarm limit can only
+    /// ever cost next-day backups. If the limit blocks a current/next nag,
+    /// following-occurrence nags (of any alarm) are dropped to make room.
+    private func ensureNags(for alarms: [RiseAlarm], now: Date) async {
+        var plans: [(alarm: RiseAlarm, targets: [Date])] = []
+        for alarm in alarms {
+            let targets = alarm.nagTargetOccurrences(now: now, policy: policy)
+            cancel(index.nags(for: alarm.id).filter { !targets.contains($0.occurrence) })
+            if !targets.isEmpty { plans.append((alarm: alarm, targets: targets)) }
+        }
+
+        for plan in plans {
+            var outcome = await fillNags(for: plan.alarm, occurrence: plan.targets[0], now: now)
+            if outcome == .limitReached, shedFollowingNags(now: now) {
+                outcome = await fillNags(for: plan.alarm, occurrence: plan.targets[0], now: now)
+            }
+            if outcome == .limitReached {
+                lastError = "iOS alarm limit reached: some backup alarms for \(plan.alarm.displayLabel) were skipped. Turn off alarms you do not need."
+                return
+            }
+        }
+
+        for plan in plans {
+            for occurrence in plan.targets.dropFirst() {
+                let outcome = await fillNags(for: plan.alarm, occurrence: occurrence, now: now)
+                if outcome == .limitReached {
+                    // Current/next backups are complete; these are retried on the next reconcile.
+                    print("Rise: alarm limit reached, following-occurrence backups deferred")
+                    return
+                }
+            }
+        }
+    }
+
+    /// Schedules the missing future nags of one occurrence.
+    private func fillNags(for alarm: RiseAlarm, occurrence: Date, now: Date) async -> FillOutcome {
+        let have = Set(index.nags(for: alarm.id).filter { $0.occurrence == occurrence }.map(\.ordinal))
+        let dates = NagChain.dates(occurrence: occurrence, policy: policy)
         for (offset, date) in dates.enumerated() {
             let ordinal = offset + 1
             guard date > now, !have.contains(ordinal) else { continue }
             let id = UUID()
             do {
                 try await AlarmKitBridge.scheduleNag(id: id, at: date, for: alarm, ordinal: ordinal, total: policy.count)
-                index.add(ScheduledNag(alarmKitID: id, riseAlarmID: alarm.id, occurrence: target,
+                index.add(ScheduledNag(alarmKitID: id, riseAlarmID: alarm.id, occurrence: occurrence,
                                        fireDate: date, ordinal: ordinal))
             } catch {
-                if AlarmKitBridge.isLimitError(error) {
-                    lastError = "iOS alarm limit reached: some backup alarms for \(alarm.displayLabel) were skipped. Turn off alarms you do not need."
-                } else {
-                    report(error, context: "Could not schedule backup alarms")
-                }
-                return
+                if AlarmKitBridge.isLimitError(error) { return .limitReached }
+                report(error, context: "Could not schedule backup alarms")
+                return .failed
             }
         }
+        return .done
+    }
+
+    /// Cancels nags that belong to an occurrence later than their alarm's
+    /// current/next one. Returns whether anything was freed.
+    private func shedFollowingNags(now: Date) -> Bool {
+        let extra = index.entries.filter { nag in
+            guard let alarm = store.alarm(id: nag.riseAlarmID),
+                  let primary = alarm.nagTargetOccurrence(now: now, policy: policy) else { return false }
+            return nag.occurrence > primary
+        }
+        cancel(extra)
+        return !extra.isEmpty
     }
 
     private func cancel(_ nags: [ScheduledNag]) {

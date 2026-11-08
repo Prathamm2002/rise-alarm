@@ -58,6 +58,26 @@ enum OccurrenceResolver {
             ?? NextFireCalculator.nextFireDate(hour: hour, minute: minute, weekdays: weekdays,
                                                after: now, calendar: calendar)
     }
+
+    /// Occurrences that should have nags pre-scheduled, most urgent first: the
+    /// nag target and, for a repeating alarm, the occurrence after it.
+    ///
+    /// Keeping the following occurrence covered means a repeating alarm never
+    /// wakes the user without backups, even if the app did not run (no intent,
+    /// no launch) since the previous occurrence.
+    static func nagTargetOccurrences(hour: Int, minute: Int, weekdays: Set<Weekday>, armedSince: Date,
+                                     lastCompleted: Date?, now: Date, calendar: Calendar,
+                                     policy: NagPolicy) -> [Date] {
+        guard let primary = nagTargetOccurrence(hour: hour, minute: minute, weekdays: weekdays,
+                                                armedSince: armedSince, lastCompleted: lastCompleted,
+                                                now: now, calendar: calendar, policy: policy) else { return [] }
+        guard !weekdays.isEmpty,
+              let following = NextFireCalculator.nextFireDate(hour: hour, minute: minute, weekdays: weekdays,
+                                                              after: primary, calendar: calendar) else {
+            return [primary]
+        }
+        return [primary, following]
+    }
 }
 
 extension RiseAlarm {
@@ -73,6 +93,13 @@ extension RiseAlarm {
         OccurrenceResolver.nagTargetOccurrence(hour: hour, minute: minute, weekdays: weekdays,
                                                armedSince: armedSince, lastCompleted: lastCompletedOccurrence,
                                                now: now, calendar: calendar, policy: policy)
+    }
+
+    func nagTargetOccurrences(now: Date = .now, calendar: Calendar = .current,
+                              policy: NagPolicy = .standard) -> [Date] {
+        OccurrenceResolver.nagTargetOccurrences(hour: hour, minute: minute, weekdays: weekdays,
+                                                armedSince: armedSince, lastCompleted: lastCompletedOccurrence,
+                                                now: now, calendar: calendar, policy: policy)
     }
 
     func nextFireDate(after date: Date = .now, calendar: Calendar = .current) -> Date? {
