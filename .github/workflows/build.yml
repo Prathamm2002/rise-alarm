@@ -29,7 +29,7 @@ jobs:
             [ -n "$F" ] && cp "$F" "api-dump/$FW.swiftinterface"
           done
           # Cross-import overlays or helper modules that mention AlarmKit
-          find "$SDK" -name "*.swiftinterface" -path "*Alarm*" > api-dump/alarm-related-interfaces.txt 2>/dev/null || true
+          find "$SDK/" -name "*.swiftinterface" -path "*Alarm*" > api-dump/alarm-related-interfaces.txt 2>/dev/null || true
           grep -nE "init\(title|stopButton|secondaryButtonBehavior|struct AlarmConfiguration|func schedule|alarmUpdates|func stop|func cancel|authorizationState|enum State|case alerting|AlarmError|deprecated|unavailable" api-dump/AlarmKit.swiftinterface || true
           grep -nE "openAppWhenRun|supportedModes|protocol LiveActivityIntent" api-dump/AppIntents.swiftinterface || true
           grep -nE "AlertSound" api-dump/ActivityKit.swiftinterface | head -20 || true

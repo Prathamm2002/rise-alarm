@@ -11,6 +11,15 @@ struct AlarmRowView: View {
     let alarm: RiseAlarm
     let onToggle: (Bool) -> Void
 
+    /// Local mirror of `alarm.isEnabled` so the Toggle needs no custom Binding.
+    @State private var isOn: Bool
+
+    init(alarm: RiseAlarm, onToggle: @escaping (Bool) -> Void) {
+        self.alarm = alarm
+        self.onToggle = onToggle
+        self._isOn = State(initialValue: alarm.isEnabled)
+    }
+
     private var timeText: (time: String, period: String?) {
         var components = DateComponents()
         components.hour = alarm.hour
@@ -48,9 +57,15 @@ struct AlarmRowView: View {
                 .foregroundStyle(Theme.secondaryText)
             }
             Spacer()
-            Toggle("", isOn: Binding(get: { alarm.isEnabled }, set: onToggle))
+            Toggle("", isOn: $isOn)
                 .labelsHidden()
                 .tint(Theme.accent)
+                .onChange(of: isOn) { _, newValue in
+                    if newValue != alarm.isEnabled { onToggle(newValue) }
+                }
+                .onChange(of: alarm.isEnabled) { _, newValue in
+                    if isOn != newValue { isOn = newValue }
+                }
         }
         .padding(.vertical, 6)
         .contentShape(Rectangle())
